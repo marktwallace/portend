@@ -18,6 +18,7 @@ nohup uv run uvicorn main:app \
     --host 0.0.0.0 \
     --port "$PORT" \
     --root-path "$SERVER_BASE_URL_PATH" \
+    --log-config "$SCRIPT_DIR/log_config.json" \
     > "$LOG_FILE" 2>&1 &
 
 echo $! > "$PID_FILE"
