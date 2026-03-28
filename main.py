@@ -16,6 +16,17 @@ HOME = Path.home()
 LOGS_DIR = HOME / "logs"
 BASE_URL = os.environ.get("SERVER_BASE_URL_PATH", "").rstrip("/")
 
+LOG_LEVELS = {"DEBUG": 0, "INFO": 1, "WARN": 2, "ERROR": 3}
+
+def classify_line(line: str) -> str:
+    if " ERROR " in line or "ERROR:" in line:
+        return "ERROR"
+    if " WARNING " in line or " WARN " in line:
+        return "WARN"
+    if '"GET ' in line:
+        return "DEBUG"
+    return "INFO"
+
 
 # --- Auth ---
 
@@ -111,17 +122,19 @@ def get_status(app_dir: Path) -> dict:
     }
 
 
-def get_log_lines(app_dir: Path, n: int = 200) -> str:
+def get_log_lines(app_dir: Path, n: int = 200, min_level: str = "INFO") -> str:
     log_file = LOGS_DIR / f"{app_dir.name}.log"
     if not log_file.exists():
         return "(no log file found)"
+    min_val = LOG_LEVELS.get(min_level.upper(), 1)
     lines = log_file.read_text().splitlines()
-    return "\n".join(lines[-n:])
+    filtered = [l for l in lines if LOG_LEVELS.get(classify_line(l), 1) >= min_val]
+    return "\n".join(filtered[-n:])
 
 
 # --- HTML helpers ---
 
-def render_page(request: Request, apps: list, selected: Optional[dict], log: str) -> str:
+def render_page(request: Request, apps: list, selected: Optional[dict], log: str, level: str = "INFO") -> str:
     app_list_items = ""
     for a in apps:
         dot = "🟢" if a["running"] else ("⚪" if not a["persistent"] else "🔴")
@@ -149,7 +162,12 @@ def render_page(request: Request, apps: list, selected: Optional[dict], log: str
             <button type="submit">Pull &amp; Restart</button>
         </form>'''
 
-        header = f"<strong>{s['name']}</strong>{port_text}{branch_text}{commit_text} &nbsp; {status_text} &nbsp; {refresh_form}"
+        level_links = " ".join(
+            f'<a href="{BASE_URL}/?app={s["name"]}&level={lv}" '
+            f'style="{"font-weight:bold;text-decoration:underline;" if lv == level.upper() else ""}">{lv}</a>'
+            for lv in LOG_LEVELS
+        )
+        header = f"<strong>{s['name']}</strong>{port_text}{branch_text}{commit_text} &nbsp; {status_text} &nbsp; {refresh_form} &nbsp; <small>log: {level_links}</small>"
         log_html = f'<pre id="log">{_escape(log)}</pre>'
     else:
         header = "<em>Select an app</em>"
@@ -207,11 +225,11 @@ async def api_apps(_: str = Depends(check_auth)):
 
 
 @app.get("/api/log", response_class=PlainTextResponse)
-async def api_log(app: str, n: int = 200, _: str = Depends(check_auth)):
+async def api_log(app: str, n: int = 200, level: str = "INFO", _: str = Depends(check_auth)):
     app_dir = HOME / app
     if not app_dir.exists():
         raise HTTPException(status_code=404)
-    return get_log_lines(app_dir, n)
+    return get_log_lines(app_dir, n, min_level=level)
 
 
 @app.post("/api/refresh")
@@ -236,13 +254,13 @@ async def api_refresh(request: Request, _: str = Depends(check_auth)):
 # --- Routes ---
 
 @app.get("/", response_class=HTMLResponse)
-async def index(request: Request, app: Optional[str] = None, _: str = Depends(check_auth)):
+async def index(request: Request, app: Optional[str] = None, level: str = "INFO", _: str = Depends(check_auth)):
     apps = [get_status(d) for d in discover_apps()]
     selected = next((a for a in apps if a["name"] == app), None)
     if selected is None and apps:
         selected = apps[0]
-    log = get_log_lines(Path(selected["path"])) if selected else ""
-    return render_page(request, apps, selected, log)
+    log = get_log_lines(Path(selected["path"]), min_level=level) if selected else ""
+    return render_page(request, apps, selected, log, level)
 
 
 @app.post("/refresh")
