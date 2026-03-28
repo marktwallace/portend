@@ -175,7 +175,7 @@ def render_page(request: Request, apps: list, selected: Optional[dict], log: str
 <html>
 <head>
 <meta charset="utf-8">
-<title>portend</title>
+<title>App Dashboard</title>
 <style>
   * {{ box-sizing: border-box; margin: 0; padding: 0; }}
   body {{ display: flex; height: 100vh; font-family: monospace; font-size: 13px; }}
