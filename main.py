@@ -198,6 +198,41 @@ def _escape(s: str) -> str:
     return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
+# --- API routes (AI / machine access) ---
+
+@app.get("/api/apps")
+async def api_apps(_: str = Depends(check_auth)):
+    apps = [get_status(d) for d in discover_apps()]
+    return apps
+
+
+@app.get("/api/log", response_class=PlainTextResponse)
+async def api_log(app: str, n: int = 200, _: str = Depends(check_auth)):
+    app_dir = HOME / app
+    if not app_dir.exists():
+        raise HTTPException(status_code=404)
+    return get_log_lines(app_dir, n)
+
+
+@app.post("/api/refresh")
+async def api_refresh(request: Request, _: str = Depends(check_auth)):
+    body = await request.json()
+    app_name = body.get("app")
+    if not app_name:
+        raise HTTPException(status_code=400, detail="missing 'app' field")
+    app_dir = HOME / app_name
+    refresh_script = app_dir / "refresh.sh"
+    if not refresh_script.exists():
+        raise HTTPException(status_code=404, detail=f"no refresh.sh in {app_dir}")
+    subprocess.Popen(
+        [str(refresh_script)],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    return {"status": "refresh started", "app": app_name}
+
+
 # --- Routes ---
 
 @app.get("/", response_class=HTMLResponse)
