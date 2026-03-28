@@ -26,6 +26,6 @@
     "loggers": {
         "uvicorn": {"handlers": ["default"], "level": "INFO", "propagate": false},
         "uvicorn.error": {"handlers": ["default"], "level": "INFO", "propagate": false},
-        "uvicorn.access": {"handlers": ["access"], "level": "INFO", "propagate": false}
+        "uvicorn.access": {"handlers": ["access"], "level": "WARNING", "propagate": false}
     }
 }
