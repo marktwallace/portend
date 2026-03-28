@@ -194,7 +194,7 @@ def render_page(request: Request, apps: list, selected: Optional[dict], log: str
 </head>
 <body>
 <div id="sidebar">
-  <h2>portend</h2>
+  <h2>portend &nbsp;<a href="{BASE_URL}/" title="Refresh app list">↻</a></h2>
   <ul>{app_list_items}</ul>
 </div>
 <div id="main">
