@@ -19,7 +19,7 @@ nohup uv run uvicorn main:app \
     --port "$PORT" \
     --root-path "$SERVER_BASE_URL_PATH" \
     --log-config "$SCRIPT_DIR/log_config.json" \
-    > "$LOG_FILE" 2>&1 &
+    >> "$LOG_FILE" 2>&1 &
 
 echo $! > "$PID_FILE"
 echo "$DEPLOY_NAME started on :$PORT at $SERVER_BASE_URL_PATH — log: $LOG_FILE"
