@@ -146,7 +146,7 @@ def render_page(request: Request, apps: list, selected: Optional[dict], log: str
         refresh_form = f'''
         <form method="post" action="{BASE_URL}/refresh" style="display:inline;">
             <input type="hidden" name="app" value="{s["name"]}">
-            <button type="submit">Refresh</button>
+            <button type="submit">Pull &amp; Restart</button>
         </form>'''
 
         header = f"<strong>{s['name']}</strong>{port_text}{branch_text}{commit_text} &nbsp; {status_text} &nbsp; {refresh_form}"
