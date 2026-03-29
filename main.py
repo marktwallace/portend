@@ -165,7 +165,8 @@ def render_page(request: Request, apps: list, selected: Optional[dict], log: str
             f'style="{"font-weight:bold;text-decoration:underline;" if lv == level.upper() else ""}">{lv}</a>'
             for lv in LOG_LEVELS
         )
-        header = f"<strong>{s['name']}</strong>{port_text}{branch_text}{commit_text} &nbsp; {status_text} &nbsp; {refresh_form} &nbsp; <small>log: {level_links}</small>"
+        refresh_log_link = f'<a href="{BASE_URL}/?app={s["name"]}&level={level.upper()}">Refresh log</a>'
+        header = f"<strong>{s['name']}</strong>{port_text}{branch_text}{commit_text} &nbsp; {status_text} &nbsp; {refresh_form} &nbsp; <small>{refresh_log_link} &nbsp; level: {level_links}</small>"
         log_html = f'<pre id="log">{_escape(log)}</pre>'
     else:
         header = "<em>Select an app</em>"
