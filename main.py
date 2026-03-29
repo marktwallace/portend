@@ -16,13 +16,15 @@ HOME = Path.home()
 LOGS_DIR = HOME / "logs"
 BASE_URL = os.environ.get("SERVER_BASE_URL_PATH", "").rstrip("/")
 
-LOG_LEVELS = {"INFO": 1, "WARN": 2, "ERROR": 3}
+LOG_LEVELS = {"DEBUG": 0, "INFO": 1, "WARN": 2, "ERROR": 3}
 
 def classify_line(line: str) -> str:
     if " ERROR " in line or "ERROR:" in line:
         return "ERROR"
     if " WARNING " in line or " WARN " in line:
         return "WARN"
+    if " DEBUG " in line:
+        return "DEBUG"
     return "INFO"
 
 
