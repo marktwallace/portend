@@ -1,4 +1,5 @@
 import os
+import shlex
 import subprocess
 import time
 from pathlib import Path
@@ -44,14 +45,35 @@ def check_auth(credentials: HTTPBasicCredentials = Depends(security)):
 
 # --- App discovery ---
 
-def is_persistent(app_dir: Path) -> bool:
-    return (app_dir / "start.sh").exists()
+def unit_name(app_dir: Path) -> str:
+    # Directory convention: Dabble_main -> dabble-main
+    return app_dir.name.lower().replace("_", "-")
+
+
+def systemctl_show(unit: str) -> dict:
+    props = ["LoadState", "ActiveState", "SubState", "MainPID",
+             "ActiveEnterTimestamp", "NRestarts"]
+    result = subprocess.run(
+        ["systemctl", "show", unit, "--property=" + ",".join(props)],
+        capture_output=True, text=True,
+    )
+    out = {}
+    for line in result.stdout.splitlines():
+        k, _, v = line.partition("=")
+        out[k] = v
+    return out
+
+
+def has_unit(app_dir: Path) -> bool:
+    # A slot is "persistent" if a systemd unit is installed for it; otherwise it
+    # is a cron/batch dir (e.g. the ETL), shown status-less.
+    return systemctl_show(unit_name(app_dir)).get("LoadState") == "loaded"
 
 
 def discover_apps():
     apps = []
     for d in sorted(HOME.iterdir()):
-        if d.is_dir() and (d / "refresh.sh").exists():
+        if d.is_dir() and (d / ".git").exists():
             apps.append(d)
     return apps
 
@@ -71,24 +93,24 @@ def read_env(app_dir: Path) -> dict:
 
 def get_status(app_dir: Path) -> dict:
     name = app_dir.name
-    pid_file = HOME / f".{name}.pid"
-    pid = None
-    running = False
-    uptime = None
+    show = systemctl_show(unit_name(app_dir))
+    persistent = show.get("LoadState") == "loaded"
 
-    if pid_file.exists():
-        try:
-            pid = int(pid_file.read_text().strip())
-            os.kill(pid, 0)  # check process exists
-            running = True
-            # get uptime via ps
-            result = subprocess.run(
-                ["ps", "-p", str(pid), "-o", "etime="],
-                capture_output=True, text=True
-            )
-            uptime = result.stdout.strip() or None
-        except (ValueError, ProcessLookupError, PermissionError):
-            running = False
+    running = failed = False
+    pid = None
+    uptime = None
+    restarts = None
+    if persistent:
+        active = show.get("ActiveState")
+        running = active == "active"
+        failed = active == "failed"
+        mainpid = show.get("MainPID")
+        if mainpid and mainpid != "0":
+            pid = int(mainpid)
+        restarts = show.get("NRestarts")
+        ts = show.get("ActiveEnterTimestamp")
+        if running and ts:
+            uptime = ts
 
     env = read_env(app_dir)
     port = env.get("PORT")
@@ -111,10 +133,12 @@ def get_status(app_dir: Path) -> dict:
     return {
         "name": name,
         "path": str(app_dir),
-        "persistent": is_persistent(app_dir),
+        "persistent": persistent,
         "running": running,
+        "failed": failed,
         "pid": pid,
         "uptime": uptime,
+        "restarts": restarts,
         "port": port,
         "base_path": base_path,
         "branch": branch,
@@ -123,13 +147,39 @@ def get_status(app_dir: Path) -> dict:
 
 
 def get_log_lines(app_dir: Path, n: int = 200, min_level: str = "INFO") -> str:
-    log_file = LOGS_DIR / f"{app_dir.name}.log"
-    if not log_file.exists():
-        return "(no log file found)"
     min_val = LOG_LEVELS.get(min_level.upper(), 1)
-    lines = log_file.read_text().splitlines()
+    if has_unit(app_dir):
+        # Persistent app: read the journal for its unit. Fetch a generous window,
+        # then apply the same text-based level filter as the file path below
+        # (Dabble carries its level in the line text, not journald priority).
+        result = subprocess.run(
+            ["journalctl", "-u", unit_name(app_dir), "-n", str(max(n, 1000)),
+             "-o", "short-iso", "--no-pager"],
+            capture_output=True, text=True,
+        )
+        lines = result.stdout.splitlines()
+    else:
+        # Batch/cron dir (e.g. the ETL): still logs to a file.
+        log_file = LOGS_DIR / f"{app_dir.name}.log"
+        if not log_file.exists():
+            return "(no log file found)"
+        lines = log_file.read_text().splitlines()
     filtered = [l for l in lines if LOG_LEVELS.get(classify_line(l), 1) >= min_val]
     return "\n".join(filtered[-n:])
+
+
+def _pull_and_restart(app_dir: Path) -> None:
+    # Detached so it survives portend restarting itself; systemd (PID 1) carries
+    # out the restart independently of this process. Batch dirs (no unit) pull only.
+    cmd = f"git -C {shlex.quote(str(app_dir))} pull"
+    if has_unit(app_dir):
+        cmd += f" ; sudo systemctl restart {shlex.quote(unit_name(app_dir))}"
+    subprocess.Popen(
+        ["/bin/bash", "-c", cmd],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
 
 
 # --- HTML helpers ---
@@ -144,9 +194,16 @@ def render_page(request: Request, apps: list, selected: Optional[dict], log: str
     if selected:
         s = selected
         if s["persistent"]:
-            status_text = f'{"Running" if s["running"] else "Stopped"}'
-            if s["uptime"]:
-                status_text += f" (up {s['uptime']})"
+            if s["running"]:
+                status_text = "Running"
+                if s["uptime"]:
+                    status_text += f" since {s['uptime']}"
+            elif s.get("failed"):
+                status_text = "FAILED"
+            else:
+                status_text = "Stopped"
+            if s.get("restarts") and s["restarts"] not in ("0", None):
+                status_text += f" · {s['restarts']} restarts"
             if s["pid"]:
                 status_text += f" · PID {s['pid']}"
         else:
@@ -240,15 +297,9 @@ async def api_refresh(request: Request, _: str = Depends(check_auth)):
     if not app_name:
         raise HTTPException(status_code=400, detail="missing 'app' field")
     app_dir = HOME / app_name
-    refresh_script = app_dir / "refresh.sh"
-    if not refresh_script.exists():
-        raise HTTPException(status_code=404, detail=f"no refresh.sh in {app_dir}")
-    subprocess.Popen(
-        [str(refresh_script)],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
+    if not (app_dir / ".git").exists():
+        raise HTTPException(status_code=404, detail=f"not a deployed app: {app_dir}")
+    _pull_and_restart(app_dir)
     return {"status": "refresh started", "app": app_name}
 
 
@@ -271,15 +322,9 @@ async def refresh(request: Request, _: str = Depends(check_auth)):
     if not app_name:
         raise HTTPException(status_code=400)
     app_dir = HOME / app_name
-    refresh_script = app_dir / "refresh.sh"
-    if not refresh_script.exists():
+    if not (app_dir / ".git").exists():
         raise HTTPException(status_code=404)
-    subprocess.Popen(
-        [str(refresh_script)],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
+    _pull_and_restart(app_dir)
     return RedirectResponse(url=f"{BASE_URL}/?app={app_name}", status_code=303)
 
 
