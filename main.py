@@ -256,6 +256,7 @@ def render_page(request: Request, apps: list, selected: Optional[dict], log: str
 <div id="sidebar">
   <h2><a href="{BASE_URL}/">Refresh app list</a></h2>
   <ul>{app_list_items}</ul>
+  <p style="margin-top:14px;border-top:1px solid #ccc;padding-top:8px;"><a href="{BASE_URL}/help">Help</a></p>
 </div>
 <div id="main">
   <div id="header">{header}</div>
@@ -272,6 +273,88 @@ def render_page(request: Request, apps: list, selected: Optional[dict], log: str
 
 def _escape(s: str) -> str:
     return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def render_help() -> str:
+    # Plain string (not an f-string) so the CSS braces need no escaping; only the
+    # {BASE_URL} token is substituted. Kept domain-neutral: no app/host names.
+    html = """<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>portend — help</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: monospace; font-size: 13px; line-height: 1.5; padding: 20px 28px; max-width: 820px; }
+  h1 { font-size: 16px; margin-bottom: 6px; }
+  h2 { font-size: 13px; margin: 18px 0 6px; color: #444; }
+  p { margin: 6px 0; }
+  ul { margin: 6px 0 6px 20px; }
+  code { background: #f0f0f0; padding: 1px 4px; }
+  pre { background: #f6f6f6; padding: 8px 10px; margin: 6px 0; overflow-x: auto; }
+  a { color: #06c; }
+  .dot { font-size: 15px; }
+</style>
+</head>
+<body>
+<p><a href="{BASE_URL}/">&larr; back to dashboard</a></p>
+<h1>How portend works</h1>
+<p>portend lists each app (a git checkout in the home directory). For apps managed by a
+<strong>systemd</strong> unit it shows live status and logs; it does not run the apps itself —
+systemd does. Anything portend shows, you can also do from a shell.</p>
+
+<h2>Status dots</h2>
+<ul>
+  <li><span class="dot">&#128994;</span> running — the unit is active</li>
+  <li><span class="dot">&#128308;</span> stopped or failed — a unit exists but is not running</li>
+  <li><span class="dot">&#9898;</span> batch / cron — no unit for this directory (e.g. a scheduled job); logs only</li>
+</ul>
+
+<h2>Unit names</h2>
+<p>A directory maps to a unit name by lower-casing and turning <code>_</code> into <code>-</code>:
+<code>App_Main</code> &rarr; <code>app-main</code>. Use that name in the commands below.</p>
+
+<h2>Pull &amp; Restart</h2>
+<p>The button runs, in the app's directory:</p>
+<pre>git pull
+sudo systemctl restart &lt;unit&gt;</pre>
+<p>A batch/cron directory has no unit, so it runs <code>git pull</code> only.</p>
+
+<h2>Commands you can run yourself</h2>
+<p>Replace <code>&lt;unit&gt;</code> with the unit name (e.g. <code>app-main</code>).</p>
+<p>Current state and a recent log tail:</p>
+<pre>systemctl status &lt;unit&gt;</pre>
+<p>Restart, stop, or start (a stopped unit stays down until started):</p>
+<pre>sudo systemctl restart &lt;unit&gt;
+sudo systemctl stop &lt;unit&gt;
+sudo systemctl start &lt;unit&gt;</pre>
+<p>Follow logs live:</p>
+<pre>journalctl -u &lt;unit&gt; -f</pre>
+<p>Recent history, or a specific time window:</p>
+<pre>journalctl -u &lt;unit&gt; --since "1 hour ago"
+journalctl -u &lt;unit&gt; --since "2026-01-01" --until "2026-01-02"</pre>
+<p>List all units:</p>
+<pre>systemctl list-units '*.service'</pre>
+
+<h2>Restart behavior</h2>
+<ul>
+  <li>A unit auto-restarts after any unexpected exit — crash, kill, or out-of-memory.</li>
+  <li><code>systemctl stop</code> is respected: the app stays down until you start it.</li>
+  <li>Repeated fast failures put a unit in <code>failed</code>; clear it with
+      <code>sudo systemctl reset-failed &lt;unit&gt;</code>, then start it.</li>
+</ul>
+
+<h2>Where logs live</h2>
+<p>Unit output goes to the systemd journal (<code>journalctl -u &lt;unit&gt;</code>). Directories
+without a unit log to files, which portend reads directly.</p>
+</body>
+</html>"""
+    return html.replace("{BASE_URL}", BASE_URL)
+
+
+@app.get("/help", response_class=HTMLResponse)
+async def help_page(_: str = Depends(check_auth)):
+    return render_help()
 
 
 # --- API routes (AI / machine access) ---
