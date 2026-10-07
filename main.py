@@ -46,7 +46,7 @@ def check_auth(credentials: HTTPBasicCredentials = Depends(security)):
 # --- App discovery ---
 
 def unit_name(app_dir: Path) -> str:
-    # Directory convention: Dabble_main -> dabble-main
+    # Directory convention: Dabble_prod -> dabble-prod
     return app_dir.name.lower().replace("_", "-")
 
 
